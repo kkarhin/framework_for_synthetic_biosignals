@@ -32,7 +32,7 @@ class SignalGenerator:
             Beat intervals multiplied with fs
 
         """
-        beat_intervals = np.array(beat_intervals * fs, dtype=int)
+        beat_intervals = np.array(beat_intervals*fs + 0.5, dtype=int)
 
         # Cumulative sum of pulse widths.
         pulse_widths_cumsum = np.zeros(len(beat_intervals) + 1, dtype=int)

@@ -3,9 +3,7 @@ import numpy as np
 from signal_generator import SignalGenerator
 from noise_generator import NoiseGenerator
 from beat_interval_generator import BeatIntervalGenerator
-import random
-from utils import find_corresponding, create_label, default_field
-import matplotlib.pyplot as plt
+from utils import create_label, default_field
 
 @dataclass
 class ECGWavePrms:
@@ -42,43 +40,43 @@ class ECGGenerator(SignalGenerator):
 
     def generate(self) -> tuple[np.ndarray, np.ndarray]:
         """
-        Generates clean or noisy ECG signals. Also returns labels for P and T waves and R peaks and for noise.
+        Generates clean or noisy ECG signals. Also returns indeces for P and T waves and R peaks and labels for noise.
         
         Returns
         ----------
         signal
             Clean or noisy ECG signal.
-        peak_labels
+        peak_inds
             1D array of labels for P, R and T waves.
-        labels
+        noise_labels
             Noise labels: list of tuples of noise type (str) and signal-length array of amplitude of noise. Last item in the list is the artifact label (array).
         beat_intervals
             Beat intervals in seconds
         """
-
+        
+        self.beat_interval_generator.duration = None
         self.distance = self.ecg_distance.to_list()
         self.width = self.ecg_width.to_list()
         self.amplitude = self.ecg_amplitude.to_list()
         self.symmetry = self.ecg_symmetry.to_list()
-        labels = []
+        noise_labels = []
 
         if self.noise_generator is not None:
             self.noise_generator.fs = self.fs
-            noise_signal, labels = self.noise_generator.generate()     
+            noise_signal, noise_labels = self.noise_generator.generate()     
 
             if self.noise_generator.noise_list:
                 dur = 0
                 for item in self.noise_generator.noise_list:
                     dur += item.duration
-                self.number_of_beats = int(dur/self.beat_interval_generator.mu*1.1)
-
-            # if noise_list is empty and noise was generated solely from parameters in noise_type
-            else:   
-                self.number_of_beats = np.min([self.number_of_beats,
-                                              int((self.noise_generator.noise_type.duration/self.beat_interval_generator.mu)*1.1)])
+                self.beat_interval_generator.duration = dur
+            else:
+                self.beat_interval_generator.duration = self.noise_generator.noise_type.duration
 
         self.beat_interval_generator.n = self.number_of_beats
         beat_intervals = self.beat_interval_generator.generate()
+        if self.beat_interval_generator.duration is None:
+            self.beat_interval_generator.duration = np.sum(beat_intervals)
         signal, beat_intervals = super().generate(beat_intervals, self.fs)
 
         # Find R peaks.
@@ -88,19 +86,21 @@ class ECGGenerator(SignalGenerator):
         
         p_waves = r_peaks + np.array(self.ecg_distance.p*beat_intervals, dtype=int)
         t_waves = r_peaks + np.array(self.ecg_distance.t*beat_intervals, dtype=int)
-        peak_labels = np.zeros(len(signal))
-        peak_labels = create_label(peak_labels, p_waves, 0.2)
-        peak_labels = create_label(peak_labels, r_peaks, 0.6)
-        peak_labels = create_label(peak_labels, t_waves, 0.4)
+        peak_inds = np.zeros(len(signal))
+        peak_inds = create_label(peak_inds, p_waves, 0.2)
+        peak_inds = create_label(peak_inds, r_peaks, 0.6)
+        peak_inds = create_label(peak_inds, t_waves, 0.4)
         
         if self.noise_generator is not None:
-            signal, peak_labels, labels = self.noise_generator.combine_signal_noise(signal, noise_signal, peak_labels, labels)  
+            signal, peak_inds, noise_labels = self.noise_generator.combine_signal_noise(signal, noise_signal, peak_inds, noise_labels)  
 
+        signal = signal[:int(self.fs*self.beat_interval_generator.duration)]
+        peak_inds = peak_inds[:int(self.fs*self.beat_interval_generator.duration)]
 
-        return signal, peak_labels, labels, beat_intervals/self.fs
+        return signal, peak_inds, noise_labels, beat_intervals/self.fs
     
     
-    def generate_random_set(self, number_of_signals, duration):
+    def generate_random_set(self, number_of_signals:int, duration:float):
         """
         Generates set of random ECG signals.
         
@@ -114,15 +114,16 @@ class ECGGenerator(SignalGenerator):
         ----------
         signal
             List of clean or noisy ECG signal.
-        peak_labels
+        peak_inds
             List of 1D array of labels for P, R and T waves.
-        labels
+        noise_labels
             List of noise labels: list of tuples of noise type (str) and signal-length array of amplitude of noise. Last item in the list is the artifact label (array).
         beat_list
             List of beat intervals.
         """
-        signals, peak_inds, labels, beats_list = [], [], [], []
-        self.number_of_beats = duration
+        signals, peak_inds, noise_labels, beats_list = [], [], [], []
+        self.noise_generator.noise_type.duration = duration
+        self.beat_interval_generator.duration = duration
         for _ in range(number_of_signals):
             self.beat_interval_generator.beat_intervals = None
             self.ecg_distance = self._randomize_prms(self.ecg_distance_low, self.ecg_distance_high)
@@ -135,12 +136,12 @@ class ECGGenerator(SignalGenerator):
                 self.noise_generator.randomize()
             
             signal, r_peaks, label, beats = self.generate()
-            signals.append(signal)
+            signals.append(signal[:int(duration*self.fs)])
             peak_inds.append(r_peaks)
-            labels.append(label)
+            noise_labels.append(label)
             beats_list.append(beats)
         
-        return signals, peak_inds, labels, beats_list
+        return signals, peak_inds, noise_labels, beats_list
 
     
     def _randomize_prms(self, low_prms: ECGWavePrms, 

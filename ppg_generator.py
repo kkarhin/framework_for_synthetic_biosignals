@@ -39,36 +39,37 @@ class PPGGenerator(SignalGenerator):
         ----------
         signal
             Clean or noisy PPG signal.
-        peak_labels
+        peak_inds
             1D array of labels for peaks and feet.
-        labels
+        noise_labels
             Noise labels: list of tuples of noise type (str) and signal-length array of amplitude of noise. Last item in the list is the artifact label (array).
         beat_intervals
             Beat intervals in seconds
         """
 
+        self.beat_interval_generator.duration = None
         self.distance = self.ppg_distance.to_list()
         self.width = self.ppg_width.to_list()
         self.amplitude = self.ppg_amplitude.to_list()
         self.symmetry = [1, 1]
-        labels = []
+        noise_labels = []
 
         if self.noise_generator is not None:
             self.noise_generator.fs = self.fs
-            noise_signal, labels = self.noise_generator.generate()           
+            noise_signal, noise_labels = self.noise_generator.generate()           
 
             if self.noise_generator.noise_list:
                 dur = 0
                 for item in self.noise_generator.noise_list:
                     dur += item.duration
-                self.number_of_beats = int(dur/self.beat_interval_generator.mu)
-
+                self.beat_interval_generator.duration = dur
             else:
-                self.number_of_beats = np.min([self.number_of_beats,
-                                              int(self.noise_generator.noise_type.duration/self.beat_interval_generator.mu)])
+                self.beat_interval_generator.duration = self.noise_generator.noise_type.duration
 
         self.beat_interval_generator.n = self.number_of_beats
         beat_intervals = self.beat_interval_generator.generate()
+        if self.beat_interval_generator.duration is None:
+            self.beat_interval_generator.duration = np.sum(beat_intervals)
         signal_, beat_intervals = super().generate(beat_intervals, self.fs)
 
         # Find peaks.
@@ -87,15 +88,17 @@ class PPGGenerator(SignalGenerator):
                 peaks.append(f + arg_rel_maxs[0])
 
         peaks.insert(0, np.argmax(signal_[0:feet[0]]))
-        peak_labels = np.zeros(len(signal_))
-        peak_labels = create_label(peak_labels, np.array(peaks), 0.5)
-        peak_labels = create_label(peak_labels, np.array(feet), 0.25)
+        peak_inds = np.zeros(len(signal_))
+        peak_inds = create_label(peak_inds, np.array(peaks), 0.5)
+        peak_inds = create_label(peak_inds, np.array(feet), 0.25)
         
         if self.noise_generator is not None:
-            signal_, peak_labels, labels = self.noise_generator.combine_signal_noise(signal_, noise_signal, peak_labels, labels)       
+            signal_, peak_inds, noise_labels = self.noise_generator.combine_signal_noise(signal_, noise_signal, peak_inds, noise_labels)       
 
+        signal_ = signal_[:int(self.fs*self.beat_interval_generator.duration)]
+        peak_inds = peak_inds[:int(self.fs*self.beat_interval_generator.duration)]
 
-        return signal_, peak_labels, labels, beat_intervals/self.fs
+        return signal_, peak_inds, noise_labels, beat_intervals/self.fs
     
     
     def generate_random_set(self, number_of_signals, duration):
@@ -112,16 +115,17 @@ class PPGGenerator(SignalGenerator):
         ----------
         signal
             List of clean or noisy PPG signal.
-        peak_labels
+        peak_inds
             List of 1D array of labels for peaks and feet.
-        labels
+        noise_labels
             List of noise labels: list of tuples of noise type (str) and signal-length array of amplitude of noise. Last item in the list is the artifact label (array).
         beat_list
             List of beat intervals.
         """
         
-        signals, peak_inds, labels, beats_list = [], [], [], []
-        self.number_of_beats = duration
+        signals, peak_inds, noise_labels, beats_list = [], [], [], []
+        self.noise_generator.noise_type.duration = duration
+        self.beat_interval_generator.duration = duration
         for _ in range(number_of_signals):
             x = np.random.uniform(0, 1)
             self.ppg_distance = self._randomize_prms(self.ppg_distance_low, self.ppg_distance_high, x)
@@ -135,10 +139,10 @@ class PPGGenerator(SignalGenerator):
             signal, peaks, label, beats = self.generate()
             signals.append(signal)
             peak_inds.append(peaks)
-            labels.append(label)
+            noise_labels.append(label)
             beats_list.append(beats)
         
-        return signals, peak_inds, labels, beats_list
+        return signals, peak_inds, noise_labels, beats_list
 
     
     def _randomize_prms(self, low_prms: PPGWavePrms, 
@@ -187,7 +191,7 @@ class PPGGenerator(SignalGenerator):
             PPG signal
         peaks_ppg
             Peaks of the PPG signal
-        labels_noise
+        noise_labels
             Noise label
         beat_intervals_ppg
             Beat intervals
@@ -206,10 +210,10 @@ class PPGGenerator(SignalGenerator):
         gaussian = np.concatenate((before, gaussian, after))
         beat_intervals = beat_intervals * gaussian
         self.beat_interval_generator.beat_intervals = beat_intervals
-        ppg, peaks_ppg, labels_noise, beat_intervals_ppg = self.generate()
+        ppg, peaks_ppg, noise_labels, beat_intervals_ppg = self.generate()
         first_r_peak = np.argwhere(peaks_ecg == 0.6)[0]
         first_fst_peak = np.argwhere(peaks_ppg == 0.5)[0]
         ppg = np.roll(ppg, (first_r_peak-first_fst_peak)+(int(offset*self.fs)))
         peaks_ppg = np.roll(peaks_ppg, (first_r_peak-first_fst_peak)+(int(offset*self.fs)))
 
-        return ppg, peaks_ppg, labels_noise, beat_intervals_ppg
+        return ppg, peaks_ppg, noise_labels, beat_intervals_ppg

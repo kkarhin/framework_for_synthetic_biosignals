@@ -2,13 +2,13 @@ import numpy as np
 from dataclasses import dataclass
 import random
 from utils import default_field
-import matplotlib.pyplot as plt
 
 
 @dataclass
 class BeatIntervalGenerator():
 
     n: int = 30
+    duration: float = None
     beat_intervals: list = None
     mu: float = 1.0
     mu_rng: list = default_field([0.4, 1.2])
@@ -37,6 +37,9 @@ class BeatIntervalGenerator():
         intervals
             Generated beat intervals.
         """
+        
+        if self.duration:
+            self.n = int(8*self.duration/np.min([self.mu, self.mu_new]))
 
         if self.beat_intervals is None:
             breathing_gen = lambda bf, bc, br_prev: bc*np.sin(2*np.pi*br_prev*bf)
@@ -52,6 +55,12 @@ class BeatIntervalGenerator():
                 # scales the effect of breathing for rr intervals < 0.35 to avoid negative values 
                 if intervals[i] < 0.35:
                     intervals[i] = self.mu*(1+z[i]) * (1 + breathing_gen(self.bf, self.bc, br_prev))
+                
+                if self.duration:
+                    if np.sum(intervals) >= self.duration:
+                        intervals = intervals[:i+1]
+                        self.n = len(intervals)
+                        break
 
         else:
             intervals = np.array(self.beat_intervals)

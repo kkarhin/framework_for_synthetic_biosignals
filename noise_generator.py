@@ -1,10 +1,9 @@
 import numpy as np
-from utils import interpolate_, min_max_normalize, zero_mean, find_corresponding
-from dataclasses import dataclass, field
+from utils import interpolate_, min_max_normalize, zero_mean
+from dataclasses import dataclass
 import random
 from scipy.signal import resample_poly
 from wfdb import rdsamp
-import matplotlib.pyplot as plt
 from utils import default_field
 
 @dataclass
@@ -59,7 +58,7 @@ class NoiseGenerator():
     point_prob: float = 0.5
     point_freq_rng: list = default_field([0, 1])
     point_value_rng: list = default_field([1, 10])
-    noise_types = [('walking', 0.2), ('hand_movement', 0.2), ('model', 0.2), ('baseline_wander', 0.2), ('muscle_artifact', 0.2)]
+    noise_types = [('walking', 0.15), ('hand_movement', 0.15), ('model', 0.4), ('baseline_wander', 0.15), ('muscle_artifact', 0.15)]
     artifact_bool: bool = False
     artifact_prob: float = 0.5
     artifact_amp: float = 1
@@ -73,11 +72,15 @@ class NoiseGenerator():
     artifact_idx: float = 0.5
     artifact_idx_rng: list = default_field([0, 1])
     __artifact_arrs = None
+    __tap_len:int = 20
 
     def __post_init__(self):
         self.__artifact_arrs = (self._load_noise())
         for nt in self.available_noise_types:
-                self.noise_psds[nt] = np.loadtxt(f'./measurements/{nt}.csv', delimiter=',')
+            self.noise_psds[nt] = np.loadtxt(f'./measurements/{nt}.csv', delimiter=',')
+        # even tap_len
+        self.__tap_len = self.__tap_len - self.__tap_len%2
+
     
     def generate(self):
         """
@@ -90,37 +93,14 @@ class NoiseGenerator():
         labels
             Labels for the noise: list of tuples of noise type (str) and signal-length array of amplitude of noise. Last self.noise_type in the list is the artifact label (array).
         """
-        noises, noise_labels = [], []
+
         empty = False
         # If noise_list is empty, the current noise_type is added to noise_list and removed after the noise is generated
         if not self.noise_list:
             empty = True
             self.noise_list.append(self.noise_type)
 
-        for item in self.noise_list:
-            self.noise_type = item
-            if item.name not in self.available_noise_types:
-                if item.name != 'model':
-                    raise ValueError("'%s' is not a valid noise type." % item.name)
-
-            if item.name == 'model':
-                psd, freq = self._model_psd()
-            else:
-                psd = self.noise_psds[item.name][0]
-                freq = self.noise_psds[item.name][1]
-
-            if item.point_bool:
-                psd, freq = self._add_point_frequency(psd, freq, empty)
-                
-            time, y = self._get_time_realisation(psd, freq)
-            new_fs = self.fs
-            new_time = np.linspace(0, (len(time)*(new_fs/(freq[-1]*2)))/new_fs, int((len(time))*(new_fs/(freq[-1]*2))))
-            y, time = interpolate_(time, new_time, y, fill_value='extrapolate')
-            label = self.noise_type._get_label(fs=self.fs)
-            label = (label, item.amplitude)
-            y = y[:item.duration*self.fs]
-            noises.append(y)
-            noise_labels.append(label)
+        noises, noise_labels = self._generate_noise()
 
         concat_time_real, label_indeces = self._concatenate_time_realisations(noises)
 
@@ -140,6 +120,57 @@ class NoiseGenerator():
             self.noise_list = []
 
         return concat_time_real, labels
+    
+    def _generate_noise(self):
+        """
+        Generates the noise or noises given by the noise_type objects in the noise_list and labels them accordingly.
+        Raises
+        ----------
+            ValueError: If an unavailable noise type is given.
+
+        Returns
+        ----------
+        noises
+            Noise or noises in frequency domain.
+        noise_labels   
+            The labels of the noise.
+        """
+
+        noises, noise_labels = [], []
+        
+        # If multiple noises are given, the overlapping length is added to snippets
+        if len(self.noise_list) > 1:
+            for i in range(len(self.noise_list)):
+                if i == 0 or i == len(self.noise_list)-1:
+                    self.noise_list[i].duration += self.__tap_len/2/self.fs
+                else:
+                    self.noise_list[i].duration += self.__tap_len/self.fs
+
+        for item in self.noise_list:
+            self.noise_type = item
+            if item.name not in self.available_noise_types:
+                if item.name != 'model':
+                    raise ValueError("'%s' is not a valid noise type." % item.name)
+
+            if item.name == 'model':
+                psd, freq = self._model_psd()
+            else:
+                psd = self.noise_psds[item.name][0]
+                freq = self.noise_psds[item.name][1]
+
+            if item.point_bool:
+                psd, freq = self._add_point_frequency(psd, freq)
+            time, y = self._get_time_realisation(psd, freq)
+            new_fs = self.fs
+            new_time = np.linspace(0, (len(time)*(new_fs/(freq[-1]*2)))/new_fs, int((len(time))*(new_fs/(freq[-1]*2))))
+            y, time = interpolate_(time, new_time, y, fill_value='extrapolate')
+            label = self.noise_type._get_label(fs=self.fs)
+            label = (label, item.amplitude)
+            y = y[:int(item.duration*self.fs + 0.5)]
+            noises.append(y)
+            noise_labels.append(label)
+
+        return noises, noise_labels
     
 
     def randomize(self):
@@ -182,12 +213,11 @@ class NoiseGenerator():
         y   
             The generated time realisation
         """
-        new_freq = np.linspace(freq[0], freq[-1], int(self.noise_type.duration*freq[-1]), endpoint=True)
+        new_freq = np.linspace(freq[0], freq[-1], int(self.noise_type.duration*self.fs + 0.5), endpoint=True)
         psd, freq = interpolate_(freq, new_freq, psd, fill_value='extrapolate')
         time, y = self._psd2time(freq, psd)
         if self.noise_type.name != 'model':
-            y = y/np.std(y)
-        y = y*self.noise_type.amplitude
+            y = self.noise_type.amplitude*y/np.std(y)
             
         return time, y
 
@@ -253,7 +283,7 @@ class NoiseGenerator():
         return psd/1000, freq 
 
 
-    def _add_point_frequency(self, psd: np.ndarray, freq: np.ndarray, empty: bool) -> tuple[np.ndarray, np.ndarray]:
+    def _add_point_frequency(self, psd: np.ndarray, freq: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
         Adds spike at given frequency and amplitude (point_value) to given PSD. PSD and freq are first interpolated to given duration.
         Parameters
@@ -262,8 +292,6 @@ class NoiseGenerator():
             PSD to add the point frequency
         freq
             Frequency vector of the PSD
-        empty
-            True, if noise_list was empty
         Returns
         ----------
         psd
@@ -275,15 +303,10 @@ class NoiseGenerator():
         #Check that the given frequency is in range
         point_frequency = self.noise_type.point_freq*freq[-1]
         if point_frequency>freq[-1] or point_frequency<freq[0]:
-            error_message='Given point frequency '+str(point_frequency)+' out of range ['+str(freq[0])+', '+str(freq[-1])+']'
-            if empty:
-                self.noise_list = []
-            else:
-                for i in self.noise_list:
-                    point_frequency = int(i.point_freq*freq[-1])
-                    if point_frequency>freq[-1] or point_frequency<freq[0]:
-                        i.point_freq = 0.5
-            raise ValueError(error_message)
+            print(f'Given point frequency {point_frequency} out of range [{freq[0]}, {freq[-1]}]')
+            point_frequency = np.random.uniform(freq[0], freq[-1])
+            print(f'A new point frequency {point_frequency} was randomly selected.')
+            
 
         new_freq = np.linspace(freq[0], freq[-1], int(self.noise_type.duration*freq[-1]), endpoint=True)
         psd, freq = interpolate_(freq, new_freq, psd)
@@ -357,7 +380,7 @@ class NoiseGenerator():
         return ma, bw
 
 
-    def _concatenate_two_time_realisations(self, arr1: np.ndarray, arr2: np.ndarray, tap_len: int) -> tuple[np.ndarray, np.ndarray]:
+    def _concatenate_two_time_realisations(self, arr1: np.ndarray, arr2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
         Calculates tapered part between two time realisations and appends the part to the list
 
@@ -367,8 +390,6 @@ class NoiseGenerator():
             The first time realisation
         arr2
             The second time realisation
-        tap_len
-            Length of the tapering
 
         Returns
         ----------
@@ -377,29 +398,26 @@ class NoiseGenerator():
         label_idx
             Index of the ending point of the first signal
         """   
-        w1 = np.linspace(1/tap_len, 1, tap_len)
+        w1 = np.linspace(1/self.__tap_len, 1, self.__tap_len)
         w2 = w1[::-1]
-        s1,s2a = np.split(arr1,[len(arr1)-tap_len]) 
-        s2b,s3 = np.split(arr2,[tap_len]) 
+        s1,s2a = np.split(arr1,[len(arr1)-self.__tap_len]) 
+        s2b,s3 = np.split(arr2,[self.__tap_len]) 
         s2 = s2a*w2 + s2b*w1 #-->weighted average of overlapping arrays
 
         concatenated = np.concatenate([s1, s2, s3])
-        label_idx = int(len(arr1) - (tap_len/2))
+        label_idx = int(len(arr1) - (self.__tap_len/2))
 
         
         return concatenated, label_idx
 
-    def _concatenate_time_realisations(self, time_realisations: np.ndarray, tap_len=20) -> tuple[np.ndarray, np.ndarray]:
+    def _concatenate_time_realisations(self, time_realisations: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
-        Ending and beginning of time realisations are tapered (with given length) to handle discontinuity and non-zero mean. 
-        The concatenated time realisation is tap_length*(len(time_realisations)-1) shorter than concatenating  without tapering. 
+        Ending and beginning of time realisations are tapered (with given length) to handle discontinuity and non-zero mean.
 
         Parameters
         ----------
         time_realisations
             Array of the signals to concatenate
-        tap_len
-            Length of the tapering
 
         Returns
         ----------
@@ -411,7 +429,7 @@ class NoiseGenerator():
         time_realisation = time_realisations[0]
         label_indeces = []
         for real in time_realisations[1:]:
-            time_realisation, label_idx = self._concatenate_two_time_realisations(time_realisation, real, tap_len)
+            time_realisation, label_idx = self._concatenate_two_time_realisations(time_realisation, real)
             label_indeces.append(label_idx)
         label_indeces.append(int(len(time_realisation)))
 
