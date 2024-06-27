@@ -10,6 +10,7 @@ class BeatIntervalGenerator():
     n: int = 30
     duration: float = None
     beat_intervals: list = None
+    #mean beat interval
     mu: float = 1.0
     mu_rng: list = default_field([0.4, 1.2])
     a: float = 1.2
@@ -18,6 +19,7 @@ class BeatIntervalGenerator():
     b: float = 0.075
     bc: float = 0.1
     bf: float = 1/3.6
+    #mean beat interval after step change
     mu_new: float = 0.75
     mu_new_rng: list = default_field([0.3, 2])
     step_i: float = 0.5

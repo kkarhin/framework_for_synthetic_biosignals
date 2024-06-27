@@ -52,9 +52,9 @@ class NoiseGenerator():
     noise_psds = {}
     amplitude_rng: list[float] = default_field([0.005, 0.25])
     noise_type: NoiseType = default_field(NoiseType())
-    alpha_rng: list = default_field([0, 5])
-    c_rng: list  = default_field([0.0, 4])
-    wn_rng: list = default_field([0.0, 3])
+    alpha_rng: list = default_field([0, 1])
+    c_rng: list  = default_field([0.0, 0.5])
+    wn_rng: list = default_field([0.0, 0.25])
     point_prob: float = 0.5
     point_freq_rng: list = default_field([0, 1])
     point_value_rng: list = default_field([1, 10])
@@ -91,7 +91,7 @@ class NoiseGenerator():
         concat_time_real
             Concatenated time domain noise stream. 
         labels
-            Labels for the noise: list of tuples of noise type (str) and signal-length array of amplitude of noise. Last self.noise_type in the list is the artifact label (array).
+            Labels for the noise: list of tuples of noise type (str) and signal-length array of amplitude of noise. Last tuple in the list is the artifact label (string, array).
         """
 
         empty = False
@@ -451,7 +451,7 @@ class NoiseGenerator():
         Returns
         ----------
         labels
-            List of tuples: (string label, start idx, stop idx, amplitude)
+            List of tuples: (string label, array with noise amplitude)
 
         """
         labels = [(noise[0], np.ones(label_indeces[0])*amplitude[0])]

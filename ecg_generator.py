@@ -49,7 +49,7 @@ class ECGGenerator(SignalGenerator):
         peak_inds
             1D array of labels for P, R and T waves.
         noise_labels
-            Noise labels: list of tuples of noise type (str) and signal-length array of amplitude of noise. Last item in the list is the artifact label (array).
+            Noise labels: list of tuples of noise type (str) and signal-length array of amplitude of noise. Last tuple in the list is the artifact label (array).
         beat_intervals
             Beat intervals in seconds
         """
