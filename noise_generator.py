@@ -99,7 +99,7 @@ class NoiseGenerator():
         if not self.noise_list:
             empty = True
             self.noise_list.append(self.noise_type)
-
+            
         noises, noise_labels = self._generate_noise()
 
         concat_time_real, label_indeces = self._concatenate_time_realisations(noises)
