@@ -2,6 +2,7 @@ import numpy as np
 from dataclasses import dataclass
 import random
 from utils import default_field
+import warnings
 
 
 @dataclass
@@ -83,9 +84,12 @@ class BeatIntervalGenerator():
         """
 
         tau_constant = 3
-        distance = self.step_i*self.n
-        x = np.linspace(1, self.n, self.n)
-        z = ((self.mu_new/self.mu)-1)/(1 + np.exp(-(x-distance)/self.step_f*tau_constant))
+        # distance = self.step_i*self.n
+        x = np.linspace(1, self.n, int(self.n))
+        distance = int(self.step_i*self.duration/self.mu)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            z = ((self.mu_new/self.mu)-1)/(1 + np.exp(-(x-distance)/self.step_f*tau_constant))
         
         return z
 
