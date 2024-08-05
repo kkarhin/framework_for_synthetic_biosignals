@@ -47,7 +47,6 @@ class PPGGenerator(SignalGenerator):
             Beat intervals in seconds
         """
 
-        self.beat_interval_generator.duration = None
         self.distance = self.ppg_distance.to_list()
         self.width = self.ppg_width.to_list()
         self.amplitude = self.ppg_amplitude.to_list()
@@ -55,6 +54,7 @@ class PPGGenerator(SignalGenerator):
         noise_labels = []
 
         if self.noise_generator is not None:
+            self.beat_interval_generator.duration = None
             self.noise_generator.fs = self.fs
             noise_signal, noise_labels = self.noise_generator.generate()           
 
@@ -124,7 +124,7 @@ class PPGGenerator(SignalGenerator):
         """
         
         signals, peak_inds, noise_labels, beats_list = [], [], [], []
-        self.noise_generator.noise_type.duration = duration
+        
         self.beat_interval_generator.duration = duration
         for _ in range(number_of_signals):
             x = np.random.uniform(0, 1)
@@ -134,6 +134,7 @@ class PPGGenerator(SignalGenerator):
             self.beat_interval_generator.randomize()
         
             if self.noise_generator is not None:
+                self.noise_generator.noise_type.duration = duration
                 self.noise_generator.randomize()
 
             signal, peaks, label, beats = self.generate()
